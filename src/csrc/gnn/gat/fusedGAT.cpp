@@ -79,9 +79,11 @@ std::vector<at::Tensor> fused_gat_mlp_attn_fwd(
   GlobalPass _gp(FWD);
   if (inputs[0].dtype() == at::kFloat) {
     typedef float T;
+    printf("In fused_gat_mlp_attn_fwd; Dtype is float32");
 #include "fused_gat_mlp_attn_flat_fwd.h"
   } else {
     typedef bfloat16 T;
+    printf("In fused_gat_mlp_attn_fwd; Dtype is BFloat16");
 #include "fused_gat_mlp_attn_flat_fwd.h"
   }
 }

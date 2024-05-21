@@ -1200,20 +1200,25 @@ class MulReduceTPP : public BaseTPP {
  public:
   MulReduceTPP() {}
   MulReduceTPP(int N, int M) : N(N), M(M) {
+    printf("** Initializing libxsmm kernel in MulReduceTPP\n");
     kernel = (libxsmm_meqn_function)get_kernel();
+    printf("** libxsmm kernel for MulReduceTPP initialized\n");
     initialized = true;
   }
 
   void operator()(T1* in0, T2* in1, T3* out) {
     if (!initialized)
+      printf("** libxsmm Kernel for MulReduceTPP was not initialized. Returning \n");
       return;
+    printf("** Declaring vars in MulReduceTPP op ()\n");
     libxsmm_meqn_param eqn_param;
     libxsmm_matrix_arg arg_array[2];
     arg_array[0].primary = (void*)in0;
     arg_array[1].primary = (void*)in1;
     eqn_param.inputs = arg_array;
     eqn_param.output.primary = (void*)out;
-
+    
+    printf("** Calling libxsmm kernel in MulReduceTPP () \n");
     kernel(&eqn_param);
   }
 

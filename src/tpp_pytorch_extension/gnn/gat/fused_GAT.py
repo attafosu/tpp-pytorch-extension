@@ -126,12 +126,17 @@ class GATMLPAttentionFunction(torch.autograd.Function):
     def forward(ctx, align, fuse_bias, inp_needs_grad, *inputs):
 
         if fuse_bias:
+            print("Fused bias in GATMLPAttentionFunction")
             (mlp_inp, wt, attn, bias) = inputs
             (mlp_out, attn_out) = fused_gat_cpp.fused_gat_mlp_attn_fwd(align, 1, inputs)
         else:
+            print("Non-fused bias in GATMLPAttentionFunction")
             (mlp_inp, wt, attn) = inputs
+            print(f"mlp_inp: {mlp_inp.shape}; wt: {wt.shape}; attn: {attn.shape}")
             (mlp_out, attn_out) = fused_gat_cpp.fused_gat_mlp_attn_fwd(align, 0, inputs)
+            print(f"mlp_out: {mlp_out.shape}; attn_out: {attn_out.shape}")
 
+        print("Saving tensors for backward in GATMLPAttentionFunction")
         ctx.save_for_backward(mlp_out, attn, mlp_inp, wt)  # attn_input = mlp_out
         ctx.align = align
         ctx.fuse_bias = fuse_bias
@@ -930,7 +935,8 @@ class GATConvOpt(BlockedModule):
 
                     N = h_src.size(0)
                     align = self.align if (N > self.align or N == 0) else N
-
+                    
+                    print(f"Layer has 'fc' and Input feat is a tuple. Computing GATMLPAttentionFunction...")
                     el, feat_src_ = GATMLPAttentionFunction.apply(
                         align,
                         self.fuse_src_bias,
@@ -965,13 +971,15 @@ class GATConvOpt(BlockedModule):
 
                     N = h_src.size(0)
                     align = self.align if (N > self.align or N == 0) else N
-
+                    print(f"Layer has 'fc' and Input feat is NOT a tuple. Computing GATMLPAttentionFunction...")
                     el, feat_src_ = GATMLPAttentionFunction.apply(
                         align,
                         False,
                         self.inp_needs_grad,
                         *inputs_src,
                     )
+                    print("--------- GATMLPAttentionFunction.apply Done")
+                    print(f"--------- Apply view to feat_src of shape: {feat_src_.shape}")
                     feat_src = feat_src_.view(
                         *src_prefix_shape, self._num_heads, self._out_feats
                     )
@@ -983,6 +991,7 @@ class GATConvOpt(BlockedModule):
                     ]
 
                     align = self.align if (N > self.align or N == 0) else N
+                    print(f"Computing GATMLPFunction.apply...")
 
                     feat_dst_ = GATMLPFunction.apply(
                         align,
@@ -994,6 +1003,7 @@ class GATConvOpt(BlockedModule):
                         *dst_prefix_shape, self._num_heads, self._out_feats
                     )
             else:
+                print(f"GatConv has 'fc'")
                 assert hasattr(self, "fc")
                 src_prefix_shape = dst_prefix_shape = feat.shape[:-1]
                 h_src = feat
@@ -1002,6 +1012,7 @@ class GATConvOpt(BlockedModule):
                 N = h_src.size(0)
                 align = self.align if (N > self.align or N == 0) else N
 
+                print(f"Computing GATMLPAttentionFunction...")
                 el, feat_src_ = GATMLPAttentionFunction.apply(
                     align,
                     False,
@@ -1030,6 +1041,7 @@ class GATConvOpt(BlockedModule):
             graph.dstdata.update({"er": er})
 
             # compute edge attention, el and er are a_l Wh_i and a_r Wh_j respectively.
+            print(f"Computing edge attention in GATConv forward...")
             graph.apply_edges(fn.u_add_v("el", "er", "e"))
             e = self.leaky_relu(graph.edata.pop("e"))
             # compute softmax

@@ -34,7 +34,7 @@ if (t_wt.dtype() == at::kBFloat16)
 auto bk = wt_sizes[3];
 auto bcp = bc;
 auto K = nk * bk;
-
+printf("\n!!! nk: %d; bk: %d; wt_sizes: (%d, %d, %d, %d)\n", nk, bk, nk, nc, bc, bk);
 if (t_wt.dtype() == at::kBFloat16) {
   bcp = bc + bc % 2;
 }
@@ -42,8 +42,14 @@ if (t_wt.dtype() == at::kBFloat16) {
 auto t_wt_V = wt_tensor_for_fwd(nk, bk, nc, bc, t_wt);
 
 auto t_out_mlp = t_in_mlp.new_empty({N, K}); // [N,  K]
+printf("!! **t_out_mlp: (%d, %d) !! \n", t_out_mlp.size(0), t_out_mlp.size(1));
+
+// Inserted for debug
+const int nthreads = omp_get_max_threads();
+printf("\nOMP num threads = %d\n", nthreads);
 
 if (add_bias) {
+  printf("--- Add bias in kernel\n");
   auto in = GetVLAPtr<T>(t_in_mlp, {bn, nc, bcp});
   auto wt_V = GetVLAPtr<T>(t_wt_V, {nc, bcp * bk});
   auto bias = GetVLAPtr<T>(t_bias, {bk});
@@ -58,6 +64,7 @@ if (add_bias) {
     RECORD_SCOPE(gao_gemm, {t_in_mlp, t_wt_V});
     {
       RECORD_FUNCTION("parallel_for", std::vector<c10::IValue>());
+      printf("----Enetering critical section in kernel\n");
 #pragma omp parallel
       {
         int tid = omp_get_thread_num();
@@ -99,6 +106,7 @@ if (add_bias) {
     }
   }
 } else {
+  printf("++++ No bias kernel\n");
   auto in = GetVLAPtr<T>(t_in_mlp, {bn, nc, bcp});
   auto wt_V = GetVLAPtr<T>(t_wt_V, {nc, bcp * bk});
   auto out = GetVLAPtr<T>(t_out_mlp, {bn, nk, bk});
@@ -110,6 +118,7 @@ if (add_bias) {
     RECORD_SCOPE(gao_gemm, {t_in_mlp, t_wt_V});
     {
       RECORD_FUNCTION("parallel_for", std::vector<c10::IValue>());
+      printf("++++ Entering critical section in kernel\n");
 #pragma omp parallel
       {
         int tid = omp_get_thread_num();
@@ -147,11 +156,12 @@ if (add_bias) {
   }
 }
 
+printf("!! Declaring variables !!\n");
 auto attn_sizes = t_attn_3d.sizes(); // 3D shape [1, H, F] = [1, 4, 128] let
 
 auto H = attn_sizes[1]; // 4
 auto F = attn_sizes[2]; // 128
-
+printf("!!!! H = %d; F = %d\n", H, F);
 auto t_out_attn = t_out_mlp.new_empty({N, H});
 
 auto t_attn = t_attn_3d.view({H * F});
@@ -160,6 +170,9 @@ auto in_attn = GetVLAPtr<T>(t_out_mlp, {H, F});
 auto attn = GetVLAPtr<T>(t_attn, {F}); // nk, bk
 auto out_attn = GetVLAPtr<T>(t_out_attn, {H}); // N, H
 
+printf("!! Calling MulReduceTPP in kernel !!\n");
+printf("!! t_out_mlp*: (%d, %d) !! \n", t_out_mlp.size(0), t_out_mlp.size(1));
+
 auto mul_reduce_tpp = SCOPEIT((MulReduceTPP<T, T, T>(H, F)), EW_MUL);
 {
   RECORD_SCOPE(go_attn, {t_out_attn});
@@ -167,9 +180,12 @@ auto mul_reduce_tpp = SCOPEIT((MulReduceTPP<T, T, T>(H, F)), EW_MUL);
     RECORD_FUNCTION("parallel_for", std::vector<c10::IValue>());
 #pragma omp parallel for
     for (int n = 0; n < N; n++) {
+      //printf("Calling mul_reduce_op_(3 inputs)\n");
       mul_reduce_tpp(attn[0], in_attn[n][0], out_attn[n]);
     }
   }
 }
 
+printf("!! Returning kernel output !!\n");
+printf("!! t_out_mlp: (%d, %d) !! \n", t_out_mlp.size(0), t_out_mlp.size(1));
 return {t_out_mlp, t_out_attn.view({N, H, 1})};
